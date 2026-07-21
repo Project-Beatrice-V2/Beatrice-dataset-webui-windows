@@ -83,11 +83,15 @@ EOF
 
 # Backend
 cd "$BACKEND"
-source venv/bin/activate 2>/dev/null || true
+if [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+elif [ -f "venv/Scripts/activate" ]; then
+    source venv/Scripts/activate
+fi
 
 echo "Starting Celery worker..."
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    # Use solo execution pool on macOS to prevent fork crashes with PyTorch, MPS, and Metal
+if [[ "$OSTYPE" == "darwin"* ]] || [[ "$OSTYPE" == "msys"* ]] || [[ "$OSTYPE" == "cygwin"* ]] || [[ "$OSTYPE" == "win32"* ]]; then
+    # Use solo execution pool on macOS and Windows to prevent multi-process fork crashes
     celery -A workers.celery_app worker -P solo --loglevel=info &
 else
     celery -A workers.celery_app worker --concurrency=2 --loglevel=info &

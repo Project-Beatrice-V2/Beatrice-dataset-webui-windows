@@ -2,17 +2,17 @@
   <img src="assets/logo.jpg" alt="Project Beatrice V2 Logo" width="150" />
 </p>
 
-# 🎙️ Beatrice Dataset WebUI (VoiceForge Dataset Studio)
-
+# 🎙️ Beatrice Dataset WebUI (VoiceForge Dataset Studio) - Windows Edition
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Platform Support](https://img.shields.io/badge/Platform-macOS-lightgrey.svg?style=flat&logo=apple)](https://www.apple.com/macos/)
+[![Platform Support](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue.svg?style=flat&logo=windows)](https://microsoft.com/windows)
+[![CUDA Acceleration](https://img.shields.io/badge/CUDA-11.8%20%7C%2012.1-green.svg?logo=nvidia)](https://developer.nvidia.com/cuda-zone)
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12-blue.svg?logo=python)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D%2018-green.svg?logo=node.js)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![React/Vite](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB.svg?logo=react)](https://react.dev/)
 
-An elegant, all-in-one AI voice dataset creator custom-tailored for **macOS**. Search any character, celebrity, or voice actor to automatically download, clean, segment, transcribe, and score high-quality voice datasets. Output formats are ready-to-train for **Beatrice V2**, **RVC**, **XTTS**, **StyleTTS2**, and **Tortoise**.
+An elegant, all-in-one AI voice dataset creator custom-tailored for **Windows**. Search any character, celebrity, or voice actor to automatically download, clean, segment, transcribe, and score high-quality voice datasets. Output formats are ready-to-train for **Beatrice V2**, **RVC**, **XTTS**, **StyleTTS2**, and **Tortoise**.
 
 ---
 
@@ -35,12 +35,12 @@ An elegant, all-in-one AI voice dataset creator custom-tailored for **macOS**. S
 
 ---
 
-## 🍏 MacOS Native Tuning
+## 🪟 Windows Native & CUDA Tuning
 
-This studio is specifically optimized for macOS execution:
-1. **Apple Silicon Acceleration (MPS)** — Automatically detects and runs ML models on Apple M-series GPUs using PyTorch's Metal Performance Shaders (MPS) for lightning-fast performance.
-2. **Celery Solo Pool Bypass** — Includes an automated runtime patch on macOS (`celery -P solo`) to completely bypass PyTorch-Metal multi-process fork initialization conflicts.
-3. **Homebrew Automation** — Quick-setup scripts handle FFmpeg, Node.js, and Redis automatically.
+This studio is specifically optimized for Windows execution:
+1. **NVIDIA CUDA GPU Acceleration** — Automatically detects NVIDIA GPUs (`nvidia-smi`) and configures PyTorch with CUDA 12.1 / 11.8 for fast model execution (Demucs, Pyannote, Silero VAD, Whisper).
+2. **Win32 Celery Solo Execution Pool** — Configured with `-P solo` pool mode on Windows to bypass Windows process fork limitations and prevent multi-process memory conflicts with PyTorch/CUDA.
+3. **One-Click Batch & PowerShell Launchers** — Includes native `setup.bat` / `start.bat` and PowerShell `setup.ps1` / `start.ps1` for easy one-click installation and execution.
 
 ---
 
@@ -62,49 +62,71 @@ This studio is specifically optimized for macOS execution:
 
 ```mermaid
 graph TD
-    UI[Browser UI React/Vite] <-->|HTTP / WebSockets| API[FastAPI Server]
-    API <-->|Tasks & Status| Redis[(Redis Broker)]
-    Redis <-->|solo-pool| Worker[Celery ML Worker]
+    UI["Browser UI (React / Vite)"] <-->|HTTP / WebSockets| API["FastAPI Server"]
+    API <-->|Tasks & Status| Redis[("Redis Broker")]
+    Redis <-->|solo-pool| Worker["Celery ML Worker (CUDA)"]
     
     subgraph Scraping & Retrieval
-        Worker --> Hub[HuggingFace Hub]
-        Worker --> YT[YouTube Scraper]
-        Worker --> BB[Bilibili Scraper]
+        Worker --> Hub["HuggingFace Hub"]
+        Worker --> YT["YouTube Scraper"]
+        Worker --> BB["Bilibili Scraper"]
     end
 
     subgraph Audio Processing Pipeline
-        Worker -->|Step 1| Demucs[Demucs: Vocal Separation]
-        Demucs -->|Step 2| Pyannote[Pyannote 3.1: Diarization]
-        Pyannote -->|Step 3| Silero[Silero VAD: Voice Activity Detection]
-        Silero -->|Step 4| Whisper[Whisper: Audio Transcription]
-        Whisper -->|Step 5| Score[Composite Quality Scorer]
+        Worker -->|Step 1| Demucs["Demucs: Vocal Separation"]
+        Demucs -->|Step 2| Pyannote["Pyannote 3.1: Diarization"]
+        Pyannote -->|Step 3| Silero["Silero VAD: Voice Activity Detection"]
+        Silero -->|Step 4| Whisper["Whisper: Audio Transcription"]
+        Whisper -->|Step 5| Score["Composite Quality Scorer"]
     end
     
-    Score -->|Saves SQLite| DB[(SQLite DB)]
-    Score -->|Exports| Out[LJSpeech / RVC / Parquet]
+    Score -->|Saves SQLite| DB[("SQLite DB")]
+    Score -->|Exports| Out["LJSpeech / RVC / Parquet"]
 ```
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Windows)
 
 ### Prerequisites
-Make sure you have [Homebrew](https://brew.sh/) installed, then run the setup.
+
+1. **Python 3.11 or 3.12** ([Download Python](https://www.python.org/downloads/)) — Ensure "Add Python to PATH" is checked during installation.
+2. **Node.js 18+** ([Download Node.js](https://nodejs.org/))
+3. **FFmpeg** (Required for audio processing):
+   ```cmd
+   winget install Gyan.FFmpeg
+   ```
+4. **Redis Server** or **Memurai**:
+   ```cmd
+   winget install Redis-Windows.Redis-Windows
+   ```
+
+---
 
 ### 1. Installation
-Run the self-installing setup script from the root directory:
+
+#### Option A: Command Prompt (Batch)
+Double-click `setup.bat` or run:
+```cmd
+setup.bat
+```
+
+#### Option B: PowerShell
+Right-click `setup.ps1` and select *Run with PowerShell*, or run:
+```powershell
+.\setup.ps1
+```
+
+#### Option C: Git Bash
 ```bash
 chmod +x setup.sh start.sh
 ./setup.sh
 ```
-This script will:
-- Check and install **Python 3.11/3.12** and **Node.js** via Homebrew if needed.
-- Set up a Python virtual environment and install ML requirements (PyTorch, Demucs, Whisper, Pyannote).
-- Download the pretrained models.
-- Install, configure, and start the local **Redis** service.
-- Copy backend environment settings.
+
+---
 
 ### 2. Configure Pyannote (Required for Diarization)
+
 Pyannote Speaker Diarization requires accepting user agreements and generating a HuggingFace Token:
 1. Visit [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) and accept the terms.
 2. Visit [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0) and accept the terms.
@@ -114,8 +136,22 @@ Pyannote Speaker Diarization requires accepting user agreements and generating a
    HF_TOKEN=your_token_here
    ```
 
+---
+
 ### 3. Run the Studio
-Start both frontend and backend servers simultaneously:
+
+#### Option A: Command Prompt (Batch)
+Double-click `start.bat` or run:
+```cmd
+start.bat
+```
+
+#### Option B: PowerShell
+```powershell
+.\start.ps1
+```
+
+#### Option C: Git Bash
 ```bash
 ./start.sh
 ```
@@ -166,7 +202,7 @@ curl -X POST http://localhost:8001/api/convert \
 
 ## 📦 Output Layouts
 
-Depending on your exporter selection, the system structures outputs under `voiceforge-backend/static/outputs/`:
+Outputs are structured under `voiceforge-backend/static/outputs/`:
 
 ### LJSpeech (Beatrice V2 / XTTS / StyleTTS2)
 ```
@@ -216,8 +252,12 @@ Adjust parameters in `voiceforge-backend/.env` for customized runs:
 │   ├── processing/         # Demucs, Pyannote, Silero & Whisper integrations
 │   ├── sources/            # Scrapers for HF, YouTube, Bilibili, etc.
 │   └── workers/            # Celery task definitions
-├── setup.sh                # Main setup installer
-├── start.sh                # Main unified startup runner
+├── setup.bat               # Windows Batch setup script
+├── start.bat               # Windows Batch unified startup runner
+├── setup.ps1               # Windows PowerShell setup script
+├── start.ps1               # Windows PowerShell startup runner
+├── setup.sh                # Bash setup installer (Git Bash / Linux / macOS)
+├── start.sh                # Bash unified startup runner
 ├── LICENSE                 # License terms (MIT)
 └── README.md               # You are here
 ```
@@ -227,9 +267,9 @@ Adjust parameters in `voiceforge-backend/.env` for customized runs:
 ## 🧪 Testing
 
 Verify backend services and pipeline functions:
-```bash
+```cmd
 cd voiceforge-backend
-source venv/bin/activate
+venv\Scripts\activate
 pytest tests/ -v
 ```
 

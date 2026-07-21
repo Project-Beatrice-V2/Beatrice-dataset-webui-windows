@@ -59,11 +59,23 @@ if [ ! -d "venv" ]; then
     "$PYTHON" -m venv venv
     echo "$PY_VER" > venv/.python-version
 fi
-source venv/bin/activate
+if [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+elif [ -f "venv/Scripts/activate" ]; then
+    source venv/Scripts/activate
+fi
 
 echo "Installing Python dependencies..."
 pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
+
+# Detect CUDA GPU on Windows/Linux
+if command -v nvidia-smi &>/dev/null; then
+    if ! python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" &>/dev/null; then
+        echo "NVIDIA GPU detected. Installing CUDA PyTorch..."
+        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+    fi
+fi
 
 # Playwright for BTVA scraper
 echo "Installing Playwright..."
