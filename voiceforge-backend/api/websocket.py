@@ -94,11 +94,14 @@ async def websocket_job_progress(websocket: WebSocket, job_id: str):
 
         async def redis_listener():
             while True:
-                message = pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
+                # timeout=0: non-blocking poll. A blocking timeout here froze the whole
+                # event loop for every connected client.
+                message = pubsub.get_message(ignore_subscribe_messages=True, timeout=0)
                 if message and message["type"] == "message":
                     data = json.loads(message["data"])
                     await websocket.send_json(data)
-                await asyncio.sleep(0.05)
+                    continue
+                await asyncio.sleep(0.1)
 
         redis_task = asyncio.create_task(redis_listener())
 

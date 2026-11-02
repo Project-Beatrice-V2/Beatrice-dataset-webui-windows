@@ -1,6 +1,7 @@
-# VoiceForge Dataset Studio Requirements
-# For Windows CUDA Acceleration (NVIDIA GPU), setup.bat automatically installs CUDA PyTorch:
-# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# VoiceForge Dataset Studio requirements
+# NVIDIA GPUs: setup.bat / setup.ps1 / setup.sh install the CUDA build of PyTorch first
+# (index https://download.pytorch.org/whl/cu128; set TORCH_CUDA=cu126 for GTX 10-series cards).
+# The old cu121 index stops at torch 2.5.1, which is too old for pyannote.audio 4 (torch>=2.8).
 
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
@@ -27,8 +28,11 @@ huggingface-hub>=0.23.0
 datasets>=2.19.2
 openai-whisper>=20231117
 faster-whisper>=1.0.1
-webrtcvad>=2.0.10
-resemblyzer>=0.1.1.post1
+# Prebuilt wheels of webrtcvad (same `import webrtcvad`): the original package is
+# source-only and fails to build without a C compiler (MSVC on Windows).
+webrtcvad-wheels>=2.0.14
+# resemblyzer is installed by the setup scripts with --no-deps, because it pins the
+# source-only webrtcvad. Its other dependencies (librosa, numpy, scipy, torch) are above.
 
 torch>=2.3.0
 torchaudio>=2.3.0

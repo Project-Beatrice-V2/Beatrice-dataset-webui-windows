@@ -58,7 +58,8 @@ def extract_audio_from_parquet(
         if normalize:
             data = normalize_audio(data)
 
-        out_path = output_dir / f"{i:05d}.wav"
+        # Prefix with the shard name so several Parquet files don't overwrite each other.
+        out_path = output_dir / f"{parquet_path.stem}_{i:05d}.wav"
         subtype = {16: "PCM_16", 24: "PCM_24", 32: "FLOAT"}.get(bit_depth, "PCM_16")
         sf.write(str(out_path), data, sr, subtype=subtype)
         results.append(out_path)

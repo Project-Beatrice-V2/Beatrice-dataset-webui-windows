@@ -161,3 +161,13 @@ export async function cancelJob(jobId: string) {
   const res = await api.post(`/api/jobs/${jobId}/cancel`)
   return res.data
 }
+
+export interface Health {
+  status: string
+  redis: 'connected' | 'disconnected' | string
+}
+
+export async function getHealth() {
+  const res = await api.get<Health>('/api/health', { timeout: 4000 })
+  return res.data
+}

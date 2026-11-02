@@ -60,10 +60,18 @@ def get_pyannote_pipeline():
         from config import get_settings
 
         settings = get_settings()
-        _pyannote_pipeline = Pipeline.from_pretrained(
-            settings.PYANNOTE_MODEL,
-            use_auth_token=settings.HF_TOKEN or True,
-        )
+        token = settings.HF_TOKEN or True  # True = use the token saved by `hf auth login`
+        try:
+            # pyannote.audio 4.x renamed `use_auth_token` to `token`
+            pipeline = Pipeline.from_pretrained(settings.PYANNOTE_MODEL, token=token)
+        except TypeError:
+            pipeline = Pipeline.from_pretrained(settings.PYANNOTE_MODEL, use_auth_token=token)
+        if pipeline is None:
+            raise RuntimeError(
+                f"Could not load {settings.PYANNOTE_MODEL}. Accept its terms (and those of "
+                "pyannote/segmentation-3.0) on huggingface.co and set HF_TOKEN in voiceforge-backend/.env"
+            )
+        _pyannote_pipeline = pipeline
         from processing.audio_utils import get_device
         device = get_device()
         if device != "cpu":

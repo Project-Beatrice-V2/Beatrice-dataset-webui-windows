@@ -1,88 +1,109 @@
 #!/bin/bash
+# Beatrice Dataset Studio — one-time setup from Git Bash on Windows (also works on Linux).
+# setup.bat / setup.ps1 are the native Windows equivalents.
 set -e
 
-echo "=== VoiceForge Dataset Studio Setup ==="
+echo "=== Beatrice Dataset Studio setup (Git Bash) ==="
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BACKEND="$ROOT/voiceforge-backend"
 cd "$BACKEND"
 
-# Prefer Python 3.12 or 3.11 — ML stack (torch, pyarrow, pyannote) is unreliable on 3.13+
+have() { command -v "$1" &>/dev/null; }
+
+# Python 3.11 or 3.12: the ML stack (torch, pyannote, demucs) is unreliable elsewhere.
 PYTHON=""
-for candidate in python3.12 python3.11 python3; do
-    if command -v "$candidate" &>/dev/null; then
-        ver=$("$candidate" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-        major=$(echo "$ver" | cut -d. -f1)
-        minor=$(echo "$ver" | cut -d. -f2)
+FALLBACK=""
+# On Windows the "py" launcher is the reliable way in; "python3" is often the Microsoft Store stub.
+for candidate in "py -3.12" "py -3.11" python3.12 python3.11 python python3; do
+    if have "${candidate%% *}"; then
+        ver=$($candidate -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "0.0")
+        major=${ver%%.*}
+        minor=${ver#*.}
         if [ "$major" -eq 3 ] && [ "$minor" -ge 11 ] && [ "$minor" -le 12 ]; then
             PYTHON="$candidate"
             break
         fi
-        if [ -z "$PYTHON" ]; then
-            PYTHON="$candidate"
+        if [ -z "$FALLBACK" ] && [ "$major" -eq 3 ] && [ "$minor" -ge 13 ]; then
+            FALLBACK="$candidate"
         fi
     fi
 done
-
+if [ -z "$PYTHON" ] && [ -n "$FALLBACK" ]; then
+    PYTHON="$FALLBACK"
+fi
 if [ -z "$PYTHON" ]; then
-    echo "ERROR: Python 3.11+ not found. Install Python 3.12: brew install python@3.12"
+    echo "ERROR: Python 3.11 or 3.12 not found."
+    echo "       Install it with: winget install Python.Python.3.12"
     exit 1
 fi
 
-PY_VER=$("$PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PY_VER=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 echo "Using Python $PY_VER ($PYTHON)"
-
-if [ "$(echo "$PY_VER" | cut -d. -f2)" -gt 12 ]; then
-    echo "WARNING: Python $PY_VER detected. ML packages work best on 3.11–3.12."
-    echo "         Install 3.12: brew install python@3.12"
+if [ "${PY_VER#*.}" -gt 12 ]; then
+    echo "WARNING: Python $PY_VER detected. The ML packages work best on 3.11 or 3.12."
+    echo "         Install 3.12 with: winget install Python.Python.3.12"
 fi
 
-# Recreate venv if it was built with a different Python version
+# FFmpeg (audio decoding) and Node.js (web UI) are required.
+if ! have ffmpeg; then
+    echo "WARNING: FFmpeg not found. Install it with: winget install Gyan.FFmpeg (then open a new terminal)"
+fi
+if ! have npm; then
+    echo "ERROR: Node.js not found. Install it with: winget install OpenJS.NodeJS.LTS"
+    exit 1
+fi
+
+# The venv layout differs: venv/Scripts on Windows, venv/bin elsewhere
+venv_python() {
+    if [ -x venv/Scripts/python.exe ]; then echo venv/Scripts/python.exe; else echo venv/bin/python; fi
+}
+
+# Recreate the venv if it was built with a different Python version
 if [ -d "venv" ]; then
     if [ -f "venv/.python-version" ]; then
         OLD_VER=$(cat venv/.python-version)
-        if [ "$OLD_VER" != "$PY_VER" ]; then
-            echo "Removing old venv (was Python $OLD_VER, need $PY_VER)..."
-            rm -rf venv
-        fi
     else
-        VENV_VER=$(venv/bin/python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
-        if [ "$VENV_VER" != "$PY_VER" ]; then
-            echo "Removing old venv (was Python $VENV_VER, need $PY_VER)..."
-            rm -rf venv
-        fi
+        OLD_VER=$("$(venv_python)" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
+    fi
+    if [ "$OLD_VER" != "$PY_VER" ]; then
+        echo "Removing old venv (was Python $OLD_VER, need $PY_VER)..."
+        rm -rf venv
     fi
 fi
 
 if [ ! -d "venv" ]; then
     echo "Creating virtual environment..."
-    "$PYTHON" -m venv venv
+    $PYTHON -m venv venv
     echo "$PY_VER" > venv/.python-version
 fi
-if [ -f "venv/bin/activate" ]; then
-    source venv/bin/activate
-elif [ -f "venv/Scripts/activate" ]; then
-    source venv/Scripts/activate
+if [ -f venv/Scripts/activate ]; then source venv/Scripts/activate; else source venv/bin/activate; fi
+
+echo "Installing Python dependencies (this downloads PyTorch and several GB of packages)..."
+python -m pip install --upgrade pip setuptools wheel
+# NVIDIA GPU: install the CUDA build of PyTorch first so the requirements keep it.
+# cu121 stops at torch 2.5.1, too old for pyannote.audio 4; override with TORCH_CUDA=cu126.
+TORCH_CUDA="${TORCH_CUDA:-cu128}"
+if have nvidia-smi; then
+    echo "NVIDIA GPU detected: installing the CUDA build of PyTorch ($TORCH_CUDA)..."
+    python -m pip install torch torchaudio --index-url "https://download.pytorch.org/whl/$TORCH_CUDA" \
+        || echo "WARNING: CUDA PyTorch install failed; continuing with the default build."
+fi
+python -m pip install -r requirements.txt
+# resemblyzer pins the source-only `webrtcvad`; its dependencies are already installed
+# (webrtcvad-wheels provides the same module), so install it without them.
+python -m pip install --no-deps "resemblyzer>=0.1.4"
+if have nvidia-smi && ! python -c "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" &>/dev/null; then
+    echo "Restoring the CUDA build of PyTorch..."
+    python -m pip install --force-reinstall --no-deps torch torchaudio --index-url "https://download.pytorch.org/whl/$TORCH_CUDA" || true
 fi
 
-echo "Installing Python dependencies..."
-pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
+# Playwright for the BTVA resolver (optional)
+echo "Installing Playwright Chromium (optional)..."
+python -m playwright install chromium 2>/dev/null || echo "Playwright install skipped (optional)"
 
-# Detect CUDA GPU on Windows/Linux
-if command -v nvidia-smi &>/dev/null; then
-    if ! python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" &>/dev/null; then
-        echo "NVIDIA GPU detected. Installing CUDA PyTorch..."
-        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-    fi
-fi
-
-# Playwright for BTVA scraper
-echo "Installing Playwright..."
-playwright install chromium 2>/dev/null || echo "Playwright install skipped (optional)"
-
-# Pre-download ML models (optional, may take time)
-echo "Pre-downloading ML models (this may take a while)..."
+# Pre-download the Demucs model (optional, ~300 MB; otherwise it downloads on first use)
+echo "Pre-downloading the Demucs model (htdemucs_ft)..."
 python -c "
 try:
     from demucs.pretrained import get_model
@@ -92,45 +113,29 @@ except Exception as e:
     print(f'Demucs download skipped: {e}')
 " 2>/dev/null || true
 
-# Initialize database
+mkdir -p static/outputs tmp
+
+if [ ! -f .env ]; then
+    cp .env.example .env
+    echo "Created voiceforge-backend/.env from .env.example: add your HF_TOKEN for speaker diarization"
+fi
+
 echo "Initializing database..."
 python -c "from database import init_db; init_db(); print('Database initialized')"
 
-# Create directories
-mkdir -p static/outputs tmp
-
-# Frontend
-echo "Installing frontend dependencies..."
+# Web UI
+echo "Installing web UI dependencies..."
 cd "$ROOT/frontend"
 npm install
 
-# Copy env file
+# Redis (required for the Celery job queue): any Redis-compatible server, e.g. Memurai
 cd "$BACKEND"
-if [ ! -f .env ]; then
-    cp .env.example .env
-    echo "Created .env from .env.example — edit HF_TOKEN before running"
-fi
-
-# Redis (required for Celery)
-if ! redis-cli ping &>/dev/null 2>&1; then
-    if command -v brew &>/dev/null; then
-        if ! brew list redis &>/dev/null; then
-            echo "Installing Redis..."
-            brew install redis
-        fi
-        echo "Starting Redis..."
-        brew services start redis
-        sleep 2
-    fi
-    if ! redis-cli ping &>/dev/null 2>&1; then
-        echo "WARNING: Redis not running. Install with: brew install redis && brew services start redis"
-    else
-        echo "Redis ready"
-    fi
+if python -c "import redis; redis.Redis(socket_connect_timeout=1).ping()" &>/dev/null; then
+    echo "Redis is running"
 else
-    echo "Redis already running"
+    echo "WARNING: No Redis server on localhost:6379. Install Memurai: winget install Memurai.MemuraiDeveloper"
 fi
 
 echo ""
-echo "=== Setup complete! ==="
-echo "Run: ./start.sh"
+echo "=== Setup complete ==="
+echo "Next: put your Hugging Face token in voiceforge-backend/.env (HF_TOKEN=...), then run ./start.sh"

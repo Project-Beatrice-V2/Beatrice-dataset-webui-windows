@@ -1,22 +1,33 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { WS_URL } from '@/lib/config'
-import { useAppStore } from '@/store/appStore'
+import { useAppStore, type UIState } from '@/store/appStore'
 
+const LIVE_STATES: UIState[] = ['queued', 'searching', 'downloading', 'processing', 'packaging']
+
+/**
+ * Streams pipeline events for a running job. One connection per job: it is opened when
+ * the job becomes active and closed when it finishes (it used to reconnect on every
+ * state change, dropping events in between).
+ */
 export function useJobWebSocket(jobId: string | null) {
   const wsRef = useRef<WebSocket | null>(null)
-  const {
-    setProgress, setCurrentStage, setUiState, addLiveClip, setStages, uiState,
-  } = useAppStore()
+  const uiState = useAppStore((s) => s.uiState)
+  const live = !!jobId && LIVE_STATES.includes(uiState)
 
   useEffect(() => {
-    if (!jobId) return
-    if (['idle', 'previewing', 'done', 'failed'].includes(uiState)) return
+    if (!jobId || !live) return
+    const { setProgress, setCurrentStage, setUiState, addLiveClip } = useAppStore.getState()
 
     const ws = new WebSocket(`${WS_URL}/ws/jobs/${jobId}`)
     wsRef.current = ws
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data)
+      let data: Record<string, any>
+      try {
+        data = JSON.parse(event.data)
+      } catch {
+        return
+      }
 
       switch (data.event) {
         case 'stage_start':
@@ -36,7 +47,7 @@ export function useJobWebSocket(jobId: string | null) {
         case 'clip_ready':
           if (data.clip) {
             addLiveClip({
-              id: Date.now(),
+              id: Date.now() + Math.random(),
               filename: data.clip.filename,
               duration_s: data.clip.duration,
               snr_db: data.clip.snr,
@@ -56,35 +67,60 @@ export function useJobWebSocket(jobId: string | null) {
       }
     }
 
-    ws.onerror = () => setUiState('failed')
+    // A dropped socket is not a failed job: the 3 s status poll in HomePage keeps the state right.
+    ws.onerror = () => console.warn('[dataset-studio] live progress socket error; falling back to polling')
 
     return () => {
       ws.close()
       wsRef.current = null
     }
-  }, [jobId, uiState])
-
-  function updateStageStatus(stageName: string, status: 'done' | 'active' | 'pending') {
-    const stages = useAppStore.getState().stages.map((s) => {
-      if (s.name.toLowerCase().includes(stageName?.toLowerCase().split(' ')[0] || '')) {
-        return { ...s, status }
-      }
-      if (status === 'active' && s.status === 'active') {
-        return { ...s, status: 'done' as const }
-      }
-      return s
-    })
-    setStages(stages)
-  }
+  }, [jobId, live])
 
   return wsRef
 }
 
-function mapStageToUiState(stage: string): import('@/store/appStore').UIState {
+// The worker uses slightly different names for stage_start / stage_complete
+// ("Searching HuggingFace Hub" vs "Hub Search"); map both onto the stepper's names.
+const STAGE_KEYWORDS: [string[], string][] = [
+  [['enrich'], 'Query Enrichment'],
+  [['search', 'hub'], 'Hub Search'],
+  [['download'], 'Download'],
+  [['separat', 'demucs'], 'Vocal Separation'],
+  [['diariz'], 'Diarization'],
+  [['segment'], 'Segmentation'],
+  [['quality', 'denois'], 'Quality Filter'],
+  [['verif'], 'Speaker Verify'],
+  [['transcri'], 'Transcription'],
+  [['packag'], 'Packaging'],
+]
+
+function canonicalStage(stageName: string): string | null {
+  const s = stageName?.toLowerCase() || ''
+  for (const [keys, name] of STAGE_KEYWORDS) {
+    if (keys.some((k) => s.includes(k))) return name
+  }
+  return null
+}
+
+function updateStageStatus(stageName: string, status: 'done' | 'active' | 'pending') {
+  const { stages, setStages } = useAppStore.getState()
+  const target = canonicalStage(stageName)
+  const targetIdx = stages.findIndex((s) => s.name === target)
+  if (targetIdx < 0) return
+  setStages(
+    stages.map((s, i) => {
+      if (i === targetIdx) return { ...s, status }
+      // Starting a stage means everything before it has finished (or was skipped).
+      if (status === 'active' && i < targetIdx) return { ...s, status: 'done' as const }
+      return s
+    }),
+  )
+}
+
+function mapStageToUiState(stage: string): UIState {
   const s = stage?.toLowerCase() || ''
   if (s.includes('search') || s.includes('enrichment')) return 'searching'
   if (s.includes('download')) return 'downloading'
   if (s.includes('packag')) return 'packaging'
-  if (s.includes('separat') || s.includes('diariz') || s.includes('segment') || s.includes('quality') || s.includes('transcri')) return 'processing'
   return 'processing'
 }

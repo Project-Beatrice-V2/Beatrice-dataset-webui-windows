@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Loader2, Clock, XCircle } from 'lucide-react'
+import { Check, Loader2, XCircle } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { cancelJob } from '@/lib/api'
 import toast from 'react-hot-toast'
@@ -15,98 +15,73 @@ export function JobProgress() {
     setCancelling(true)
     try {
       await cancelJob(currentJobId)
-      toast.success('Job cancelled successfully')
+      toast.success('Job cancelled')
       reset()
-    } catch (e) {
-      toast.error('Failed to cancel job')
+    } catch {
+      toast.error('Could not cancel the job')
     } finally {
       setCancelling(false)
     }
   }
 
   return (
-    <div className="card space-y-8 bg-surface/50 backdrop-blur-md border border-border/60 shadow-2xl animate-slideIn">
-      {/* Progress Bar Header */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Loader2 className="w-4 h-4 text-accent animate-spin" />
-            <span className="text-sm font-bold tracking-wide text-white">{currentStage || 'Processing...'}</span>
+    <div className="card space-y-7 animate-slideIn">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-accent" />
+            <div className="min-w-0">
+              <span className="eyebrow block">Current stage</span>
+              <span className="block truncate text-[16px] font-medium">{currentStage || 'Waiting for the worker'}</span>
+            </div>
           </div>
-          <span className="text-sm font-mono font-bold text-accent text-glow">{progress}%</span>
+          <span className="font-mono text-[22px] font-medium tracking-[-0.02em]">{progress}%</span>
         </div>
-        <div className="w-full h-2.5 bg-background/80 rounded-full overflow-hidden p-0.5 border border-border/30">
-          <div
-            className="h-full bg-gradient-to-r from-accent via-secondary to-accent rounded-full transition-all duration-500 shadow-[0_0_12px_rgba(0,229,255,0.45)]"
-            style={{ width: `${progress}%` }}
-          />
+        <div className="meter" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+          <span style={{ width: `${progress}%` }} />
         </div>
       </div>
 
-      {/* Stepper Pipeline Flow */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 xl:grid-cols-10 gap-x-2 gap-y-4 pt-2">
+      <ol className="grid grid-cols-2 gap-2 sm:grid-cols-5">
         {stages.map((stage, idx) => {
           const isDone = stage.status === 'done'
           const isActive = stage.status === 'active'
           return (
-            <div
+            <li
               key={stage.name}
-              className={`flex flex-col items-center text-center p-3 rounded-2xl border transition-all duration-300 relative ${
-                isDone
-                  ? 'bg-accent/5 border-accent/30 text-accent'
-                  : isActive
-                  ? 'bg-secondary/10 border-secondary text-secondary animate-pulse scale-102 shadow-[0_0_15px_rgba(139,92,246,0.15)]'
-                  : 'bg-background/40 border-border/30 text-muted/60'
+              className={`flex items-center gap-2.5 rounded-[12px] border px-3 py-2.5 transition-colors ${
+                isActive ? 'border-accent bg-card-active' : 'border-line'
               }`}
             >
-              {/* Stepper Circle */}
-              <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center border-2 mb-2 transition-all duration-300 ${
+              <span
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border font-mono text-[10px] ${
                   isDone
-                    ? 'bg-accent/15 border-accent text-accent shadow-[0_0_10px_rgba(0,229,255,0.15)]'
+                    ? 'border-ok/40 bg-ok/10 text-ok'
                     : isActive
-                    ? 'bg-secondary/25 border-secondary text-secondary shadow-[0_0_12px_rgba(139,92,246,0.25)]'
-                    : 'bg-background border-border/60 text-muted/50'
+                    ? 'border-accent text-accent'
+                    : 'border-line text-lo'
                 }`}
               >
                 {isDone ? (
-                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <Check className="h-3 w-3" strokeWidth={2.5} />
                 ) : isActive ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin stroke-[2.5]" />
+                  <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2.5} />
                 ) : (
-                  <Clock className="w-3.5 h-3.5 opacity-40" />
+                  String(idx + 1).padStart(2, '0')
                 )}
-              </div>
-              
-              {/* Label */}
-              <span className={`text-[10px] font-bold tracking-wide leading-tight ${
-                isDone ? 'text-accent' : isActive ? 'text-secondary font-extrabold' : 'text-muted/60'
-              }`}>
+              </span>
+              <span className={`text-[12px] leading-tight ${isDone || isActive ? 'text-hi' : 'text-lo'}`}>
                 {stage.name}
               </span>
-            </div>
+            </li>
           )
         })}
-      </div>
+      </ol>
 
-      {/* Cancel button section */}
-      <div className="pt-6 flex justify-center border-t border-border/30">
-        <button
-          onClick={handleCancel}
-          disabled={cancelling}
-          className="flex items-center gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-red-400 bg-red-950/20 hover:bg-red-950/40 border border-red-500/25 hover:border-red-500/50 rounded-xl transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-        >
-          {cancelling ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Cancelling...
-            </>
-          ) : (
-            <>
-              <XCircle className="w-4 h-4" />
-              Cancel Generation
-            </>
-          )}
+      <div className="hairline-t flex justify-end pt-5">
+        <button onClick={handleCancel} disabled={cancelling} className="btn-danger btn-sm">
+          {cancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" strokeWidth={1.75} />}
+          {cancelling ? 'Cancelling' : 'Cancel job'}
         </button>
       </div>
     </div>

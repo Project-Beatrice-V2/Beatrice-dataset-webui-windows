@@ -39,10 +39,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# The API is unauthenticated, so browsers may only call it from local origins. A wildcard
+# here would let any website you visit drive (and delete) your jobs through the browser.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS + ["*"],
-    allow_credentials=True,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?",
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -53,7 +56,9 @@ app.include_router(search_router)
 app.include_router(history_router)
 app.include_router(ws_router)
 
-app.mount("/static", StaticFiles(directory=str(settings.BASE_DIR / "static")), name="static")
+# Serve packaged outputs from wherever OUTPUT_DIR points (it may live outside the repo).
+settings.ensure_dirs()
+app.mount("/static/outputs", StaticFiles(directory=str(settings.OUTPUT_DIR)), name="outputs")
 
 
 @app.get("/health")
@@ -74,3 +79,9 @@ def _check_redis() -> str:
         return "connected"
     except Exception:
         return "disconnected"
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT)

@@ -1,5 +1,6 @@
 """YouTube search + yt-dlp wrapper."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -62,7 +63,19 @@ async def search_youtube(
     query_type: str,
     character_info: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Search YouTube for relevant videos."""
+    """Search YouTube for relevant videos.
+
+    yt-dlp is blocking (several searches, each can take seconds), so it runs in a worker
+    thread instead of freezing the FastAPI event loop during a search preview.
+    """
+    return await asyncio.to_thread(_search_youtube_sync, query, query_type, character_info)
+
+
+def _search_youtube_sync(
+    query: str,
+    query_type: str,
+    character_info: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     settings = get_settings()
     search_queries = _build_queries(query, query_type, character_info)
     results = []

@@ -62,7 +62,16 @@ def create_job(request: CreateJobRequest, db: Session = Depends(get_db)):
     target_min = request.options.target_duration_minutes
     estimated = max(5, int(target_min * 0.4))
 
-    run_pipeline.apply_async(args=[job_id], task_id=job_id)
+    try:
+        run_pipeline.apply_async(args=[job_id], task_id=job_id, retry=False)
+    except Exception as e:  # broker (Redis) not reachable
+        job.status = "failed"
+        job.error_msg = "Job queue unavailable: is Redis running?"
+        db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="The job queue (Redis) is not running. Start Redis, then try again.",
+        ) from e
 
     return CreateJobResponse(
         job_id=job_id,

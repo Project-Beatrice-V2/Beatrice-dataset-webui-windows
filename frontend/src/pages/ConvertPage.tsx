@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { Upload, Download, Check, Loader2, FileAudio, X, Trash2 } from 'lucide-react'
+import { Upload, Download, Loader2, FileAudio, X, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '@/lib/api'
+import { SelectField, Switch } from '@/components/ui'
 
 export function ConvertPage() {
   const [files, setFiles] = useState<File[]>([])
@@ -23,7 +24,7 @@ export function ConvertPage() {
     onDrop,
     accept: {
       'audio/*': ['.wav', '.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.aiff', '.webm'],
-      'application/octet-stream': ['.parquet', '.npy', '.arrow', '.hdf5', '.h5'],
+      'application/octet-stream': ['.parquet', '.npy', '.arrow', '.hdf5', '.h5', '.7z'],
       'application/zip': ['.zip'],
       'application/gzip': ['.tar.gz', '.tgz'],
     },
@@ -37,6 +38,8 @@ export function ConvertPage() {
     setFiles([])
     setDownloadUrl(null)
   }
+
+  const totalMb = files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024)
 
   const handleConvert = async () => {
     if (files.length === 0) return
@@ -59,8 +62,15 @@ export function ConvertPage() {
         },
       })
       setProgress(100)
-      setDownloadUrl(res.data.download_url)
-      toast.success(`Converted ${res.data.files_converted} files! Go to History to download the ZIP.`, { duration: 6000 })
+      if (res.data.files_converted > 0) {
+        setDownloadUrl(res.data.download_url)
+        toast.success(`Converted ${res.data.files_converted} files`)
+      } else {
+        toast.error(res.data.errors?.[0] || 'Nothing could be converted')
+      }
+      if (res.data.errors?.length && res.data.files_converted > 0) {
+        toast.error(`${res.data.errors.length} file(s) were skipped`)
+      }
     } catch {
       toast.error('Conversion failed')
     } finally {
@@ -69,165 +79,113 @@ export function ConvertPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-6 pt-2 pb-12 space-y-8 animate-slideIn">
-      <div className="text-center space-y-2">
-        <h1 className="text-3xl font-display font-bold text-white">Universal Audio Converter</h1>
-        <p className="text-muted text-sm max-w-md mx-auto">
-          Convert raw clips, HuggingFace Parquet, or nested datasets into training-ready WAV audio.
+    <div className="shell max-w-3xl space-y-8 pb-12 animate-slideIn">
+      <section className="pt-10 text-center sm:pt-14">
+        <span className="eyebrow">Universal converter</span>
+        <h1 className="display mt-5 text-[36px] sm:text-[48px]">Bring your own audio.</h1>
+        <p className="mx-auto mt-4 max-w-lg text-[15px] text-mid">
+          Turn recordings, Hugging Face Parquet shards or whole archives into clean, training-ready WAV files.
         </p>
-      </div>
+      </section>
 
-      {/* Drag & Drop Zone */}
       <div
         {...getRootProps()}
-        className={`glass-card border-dashed border-2 cursor-pointer transition-all duration-300 text-center py-14 relative overflow-hidden group ${
-          isDragActive
-            ? 'border-accent bg-accent/5 scale-[1.01] shadow-[0_0_20px_rgba(0,229,255,0.15)]'
-            : 'border-border/80 hover:border-accent/40 hover:bg-surface/30'
+        className={`group cursor-pointer rounded-card border border-dashed px-6 py-14 text-center transition-colors ${
+          isDragActive ? 'border-accent bg-card-active' : 'border-line-strong bg-card hover:bg-card-hover'
         }`}
       >
         <input {...getInputProps()} />
-        <div className="absolute inset-0 bg-gradient-to-br from-accent/5 via-transparent to-secondary/5 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-        <div className="relative space-y-4">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-surface/80 border border-border/60 flex items-center justify-center group-hover:scale-105 group-hover:border-accent/40 group-hover:shadow-[0_0_15px_rgba(0,229,255,0.15)] transition-all duration-300">
-            <Upload className={`w-7 h-7 transition-colors duration-300 ${isDragActive ? 'text-accent animate-bounce' : 'text-muted group-hover:text-accent'}`} />
-          </div>
-          <div>
-            <p className="text-base font-semibold text-white">Drop files here or click to browse</p>
-            <p className="text-xs text-muted/70 mt-2 font-mono max-w-sm mx-auto">
-              WAV, MP3, FLAC, OGG, OPUS, M4A, Parquet, NPY, ZIP/TAR.GZ
-            </p>
-          </div>
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-line">
+          <Upload className={`h-6 w-6 transition-colors ${isDragActive ? 'text-accent' : 'text-mid group-hover:text-hi'}`} strokeWidth={1.5} />
         </div>
+        <p className="mt-5 text-[16px] font-medium">Drop files here, or click to browse</p>
+        <p className="mt-2 font-mono text-[12px] text-lo">WAV · MP3 · FLAC · OGG · OPUS · M4A · Parquet · NPY · ZIP · TAR.GZ · 7Z</p>
       </div>
 
-      {/* Queued Files List */}
       {files.length > 0 && (
-        <div className="glass-card space-y-4 border-border/60 shadow-xl">
+        <div className="card space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-muted uppercase tracking-wider">
-              Files Queued ({files.length})
+            <span className="eyebrow">
+              {files.length} file{files.length === 1 ? '' : 's'} · {totalMb.toFixed(1)} MB
             </span>
-            <button
-              onClick={clearAll}
-              className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 transition-colors font-semibold cursor-pointer"
-            >
-              <Trash2 className="w-3.5 h-3.5" /> Clear All
+            <button onClick={clearAll} className="btn-danger btn-sm">
+              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} /> Clear all
             </button>
           </div>
-          <div className="max-h-52 overflow-y-auto space-y-2 pr-2">
+          <ul className="max-h-56 space-y-1.5 overflow-y-auto pr-1">
             {files.map((f, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between bg-background/50 border border-border/50 rounded-xl px-4 py-2.5 hover:border-accent/20 transition-all duration-200"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <FileAudio className="w-4 h-4 text-accent flex-shrink-0" />
-                  <span className="text-xs font-mono text-white/90 truncate">{f.name}</span>
-                  <span className="text-[10px] text-muted/65 flex-shrink-0">
-                    ({(f.size / (1024 * 1024)).toFixed(2)} MB)
-                  </span>
-                </div>
-                <button
-                  onClick={() => removeFile(i)}
-                  className="p-1 text-muted/60 hover:text-white rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
+              <li key={`${f.name}-${i}`} className="tile flex items-center justify-between gap-3 !py-2.5">
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <FileAudio className="h-4 w-4 shrink-0 text-accent" strokeWidth={1.75} />
+                  <span className="truncate font-mono text-[12px] text-hi">{f.name}</span>
+                  <span className="shrink-0 font-mono text-[11px] text-lo">{(f.size / (1024 * 1024)).toFixed(2)} MB</span>
+                </span>
+                <button onClick={() => removeFile(i)} className="icon-btn !h-7 !w-7 border-transparent" aria-label={`Remove ${f.name}`}>
+                  <X className="h-3.5 w-3.5" />
                 </button>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         </div>
       )}
 
-      {/* Conversion Options Cards */}
-      <div className="glass-card grid grid-cols-1 sm:grid-cols-2 gap-5 border-border/60 shadow-xl">
-        <div>
-          <label className="text-xs font-bold text-muted/80 uppercase tracking-widest mb-2 block">Sample Rate</label>
-          <select
-            value={sampleRate}
-            onChange={(e) => setSampleRate(+e.target.value)}
-            className="input-field w-full bg-background/45 border-border/60 text-sm cursor-pointer"
-          >
-            <option value={16000}>16000 Hz (TTS standard)</option>
-            <option value={22050}>22050 Hz (Recommended)</option>
-            <option value={44100}>44100 Hz (High-fidelity)</option>
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-bold text-muted/80 uppercase tracking-widest mb-2 block">Bit Depth</label>
-          <select
-            value={bitDepth}
-            onChange={(e) => setBitDepth(+e.target.value)}
-            className="input-field w-full bg-background/45 border-border/60 text-sm cursor-pointer"
-          >
-            <option value={16}>16-bit PCM</option>
-            <option value={24}>24-bit PCM</option>
-            <option value={32}>32-bit Float</option>
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-bold text-muted/80 uppercase tracking-widest mb-2 block">Channels</label>
-          <select
-            value={channels}
-            onChange={(e) => setChannels(e.target.value)}
-            className="input-field w-full bg-background/45 border-border/60 text-sm cursor-pointer"
-          >
-            <option value="mono">Mono (Recommended for TTS)</option>
-            <option value="stereo">Stereo</option>
-          </select>
-        </div>
-        <div className="flex items-center pl-1 pt-4 sm:pt-0">
-          <label className="flex items-center gap-3 cursor-pointer group">
-            <input
-              type="checkbox"
-              checked={normalize}
-              onChange={(e) => setNormalize(e.target.checked)}
-              className="w-4 h-4 rounded accent-accent bg-background border-border/60"
-            />
-            <span className="text-sm font-semibold text-white/95 group-hover:text-white transition-colors">
-              Normalize loudness (-20 dBFS)
-            </span>
-          </label>
+      <div className="card grid grid-cols-1 gap-6 sm:grid-cols-2">
+        <SelectField
+          label="Sample rate"
+          value={sampleRate}
+          onChange={setSampleRate}
+          options={[
+            { value: 16000, label: '16 kHz · speech models' },
+            { value: 22050, label: '22.05 kHz · recommended' },
+            { value: 44100, label: '44.1 kHz · high fidelity' },
+          ]}
+        />
+        <SelectField
+          label="Bit depth"
+          value={bitDepth}
+          onChange={setBitDepth}
+          options={[
+            { value: 16, label: '16-bit PCM' },
+            { value: 24, label: '24-bit PCM' },
+            { value: 32, label: '32-bit float' },
+          ]}
+        />
+        <SelectField
+          label="Channels"
+          value={channels}
+          onChange={setChannels}
+          options={[
+            { value: 'mono', label: 'Mono · recommended' },
+            { value: 'stereo', label: 'Stereo' },
+          ]}
+        />
+        <div className="flex items-end">
+          <div className="tile w-full !py-2.5">
+            <Switch label="Normalise loudness" description="To -20 dBFS RMS" checked={normalize} onChange={setNormalize} />
+          </div>
         </div>
       </div>
 
-      {/* Progress Bar (Visible during conversion) */}
       {converting && (
         <div className="space-y-2 animate-fadeIn">
-          <div className="flex justify-between text-xs font-bold text-muted">
-            <span>Uploading & Converting...</span>
-            <span>{progress}%</span>
+          <div className="flex justify-between">
+            <span className="eyebrow">{progress < 100 ? 'Uploading' : 'Converting'}</span>
+            <span className="font-mono text-[12px] text-mid">{progress}%</span>
           </div>
-          <div className="w-full h-2 bg-background/80 rounded-full overflow-hidden p-0.5 border border-border/20">
-            <div
-              className="h-full bg-gradient-to-r from-accent to-secondary rounded-full transition-all duration-300 shadow-[0_0_10px_rgba(0,229,255,0.35)]"
-              style={{ width: `${progress}%` }}
-            />
+          <div className="meter">
+            <span style={{ width: `${progress}%` }} />
           </div>
         </div>
       )}
 
-      {/* Actions */}
-      <div className="flex gap-4">
-        <button
-          onClick={handleConvert}
-          disabled={files.length === 0 || converting}
-          className="btn-primary flex items-center gap-2.5 flex-1 justify-center py-3 rounded-xl tracking-wide cursor-pointer disabled:opacity-40"
-        >
-          {converting ? (
-            <Loader2 className="w-4.5 h-4.5 animate-spin" />
-          ) : (
-            <Upload className="w-4.5 h-4.5" />
-          )}
-          Convert {files.length > 0 ? `(${files.length} Files)` : ''}
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <button onClick={handleConvert} disabled={files.length === 0 || converting} className="btn-primary btn-lg flex-1">
+          {converting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" strokeWidth={2} />}
+          {files.length > 0 ? `Convert ${files.length} file${files.length === 1 ? '' : 's'}` : 'Convert'}
         </button>
         {downloadUrl && (
-          <a
-            href={downloadUrl}
-            className="btn-secondary flex items-center gap-2.5 px-6 py-3 rounded-xl tracking-wide hover:shadow-[0_0_15px_rgba(139,92,246,0.15)] cursor-pointer"
-          >
-            <Download className="w-4.5 h-4.5" /> Download ZIP
+          <a href={downloadUrl} className="btn-secondary btn-lg">
+            <Download className="h-4 w-4" strokeWidth={1.75} /> Download ZIP
           </a>
         )}
       </div>

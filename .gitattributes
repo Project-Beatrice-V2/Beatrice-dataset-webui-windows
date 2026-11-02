@@ -1,0 +1,6 @@
+# Windows scripts must keep CRLF line endings (cmd.exe mis-parses labels and blocks in LF files)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+# Shell scripts must keep LF so Git Bash / Linux can run them
+*.sh  text eol=lf

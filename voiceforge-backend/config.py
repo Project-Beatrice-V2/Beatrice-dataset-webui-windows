@@ -8,17 +8,21 @@ import secrets
 from pathlib import Path
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+BACKEND_DIR = Path(__file__).resolve().parent
 
 
 class Settings(BaseSettings):
-    # Server
-    HOST: str = "0.0.0.0"
-    PORT: int = 8000
+    # Server. The API has no authentication, so it only listens on this computer by
+    # default. Set HOST=0.0.0.0 only on a trusted network.
+    HOST: str = "127.0.0.1"
+    PORT: int = 8001
     DEBUG: bool = False
     SECRET_KEY: str = secrets.token_hex(32)
 
-    # Database
+    # Database (relative SQLite paths are resolved against voiceforge-backend/)
     DATABASE_URL: str = "sqlite:///./voiceforge.db"
 
     # Redis
@@ -28,10 +32,10 @@ class Settings(BaseSettings):
     CELERY_WORKERS: int = 4
     MAX_CONCURRENT_DOWNLOADS: int = 3
 
-    # Storage
-    BASE_DIR: Path = Path(__file__).parent
-    OUTPUT_DIR: Path = BASE_DIR / "static" / "outputs"
-    TEMP_DIR: Path = BASE_DIR / "tmp"
+    # Storage (relative paths are resolved against voiceforge-backend/, not the shell's cwd)
+    BASE_DIR: Path = BACKEND_DIR
+    OUTPUT_DIR: Path = BACKEND_DIR / "static" / "outputs"
+    TEMP_DIR: Path = BACKEND_DIR / "tmp"
     MAX_OUTPUT_SIZE_GB: float = 50.0
     RETENTION_DAYS: int = 7
 
@@ -57,10 +61,30 @@ class Settings(BaseSettings):
     YOUTUBE_MAX_RESULTS: int = 50
     BILIBILI_MAX_RESULTS: int = 30
 
-    # CORS
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"]
+    # CORS: extra browser origins allowed to call the API. Any http://localhost:<port> and
+    # http://127.0.0.1:<port> origin is always allowed (see main.py); the bundled UI uses
+    # the Vite proxy and does not need CORS at all.
+    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {
+        "env_file": str(BACKEND_DIR / ".env"),
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
+
+    @model_validator(mode="after")
+    def _resolve_paths(self) -> "Settings":
+        base = Path(self.BASE_DIR).resolve()
+        if not self.OUTPUT_DIR.is_absolute():
+            self.OUTPUT_DIR = (base / self.OUTPUT_DIR).resolve()
+        if not self.TEMP_DIR.is_absolute():
+            self.TEMP_DIR = (base / self.TEMP_DIR).resolve()
+        prefix = "sqlite:///"
+        if self.DATABASE_URL.startswith(prefix):
+            db_path = self.DATABASE_URL[len(prefix):]
+            if db_path and db_path != ":memory:" and not Path(db_path).is_absolute():
+                self.DATABASE_URL = prefix + str((base / db_path).resolve())
+        return self
 
     def ensure_dirs(self) -> None:
         self.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

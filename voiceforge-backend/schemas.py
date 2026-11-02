@@ -24,6 +24,9 @@ class JobOptions(BaseModel):
     include_secondary_speakers: bool = False
     manual_speaker_selection: bool = False
     use_demucs: bool = True
+    # Read by workers/stage_speaker_verify.py; it used to be dropped here, so the
+    # "Speaker similarity" slider in the UI had no effect.
+    speaker_similarity_threshold: float = Field(0.75, ge=0.0, le=1.0)
     video_sources: list[str] = Field(
         default_factory=lambda: ["youtube", "bilibili", "nicovideo", "archive_org"]
     )

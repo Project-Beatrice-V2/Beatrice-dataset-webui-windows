@@ -1,74 +1,75 @@
 @echo off
-setlocal enabledelayedexpansion
-
-echo ===================================================
-echo   VoiceForge Dataset Studio Launcher (Windows)
-echo ===================================================
-echo.
+rem Beatrice Dataset Studio - starts the job worker, the FastAPI backend and the web UI,
+rem each in its own window. Close those windows to stop the services.
+rem Keep this file ASCII with CRLF line endings; no %errorlevel% inside ( ) blocks.
+setlocal EnableExtensions
+chcp 65001 >nul
 
 set "ROOT=%~dp0"
 set "BACKEND=%ROOT%voiceforge-backend"
 set "FRONTEND=%ROOT%frontend"
+set "VPY=%BACKEND%\venv\Scripts\python.exe"
+if "%VOICEFORGE_PORT%"=="" set "VOICEFORGE_PORT=8001"
+rem The API has no authentication, so it only listens on this computer by default.
+if "%VOICEFORGE_HOST%"=="" set "VOICEFORGE_HOST=127.0.0.1"
 
-if "%VOICEFORGE_PORT%"=="" (
-    set "PORT=8001"
-) else (
-    set "PORT=%VOICEFORGE_PORT%"
-)
+echo ===================================================
+echo   Beatrice Dataset Studio - Windows
+echo ===================================================
+echo.
 
-:: Ensure backend venv exists
-if not exist "%BACKEND%\venv\Scripts\activate.bat" (
-    echo [ERROR] Virtual environment not found at %BACKEND%\venv
-    echo Please run setup.bat first!
-    pause
-    exit /b 1
-)
+if not exist "%VPY%" goto :no_venv
+if not exist "%FRONTEND%\node_modules" goto :no_node_modules
 
-:: Sync frontend env
-echo VITE_API_URL=http://localhost:%PORT% > "%FRONTEND%\.env"
-echo VITE_WS_URL=ws://localhost:%PORT% >> "%FRONTEND%\.env"
+rem The web UI proxies /api and /ws to the backend on this port.
+> "%FRONTEND%\.env" echo VOICEFORGE_PORT=%VOICEFORGE_PORT%
 
-:: Start Redis if available locally
+rem --- Redis --------------------------------------------------------------------
+"%VPY%" -c "import redis; redis.Redis(socket_connect_timeout=1).ping()" >nul 2>nul
+if not errorlevel 1 goto :redis_ok
 where redis-server >nul 2>nul
-if %errorlevel% equ 0 (
-    echo [*] Checking Redis server status...
-    where redis-cli >nul 2>nul
-    if %errorlevel% equ 0 (
-        redis-cli ping >nul 2>nul
-        if %errorlevel% neq 0 (
-            echo [*] Starting local Redis server...
-            start "Redis Server" /min redis-server
-            timeout /t 2 /nobreak >nul
-        ) else (
-            echo [OK] Redis server is already running.
-        )
-    )
-) else (
-    echo [NOTE] redis-server not in PATH. Ensure Redis / Memurai service is running for job processing.
-)
+if errorlevel 1 goto :redis_missing
+echo [*] Starting redis-server...
+start "Redis" /min redis-server
+timeout /t 2 /nobreak >nul
+goto :redis_done
+:redis_missing
+echo [WARNING] No Redis server is running, so dataset jobs will not start.
+echo           Start the Memurai service, or install it: winget install Memurai.MemuraiDeveloper
+goto :redis_done
+:redis_ok
+echo [OK] Redis is running.
+:redis_done
 
-:: Set PYTHONPATH for backend modules
-set "PYTHONPATH=%BACKEND%;%PYTHONPATH%"
+set "PYTHONPATH=%BACKEND%"
 
-echo.
-echo [*] Launching Celery ML worker (solo pool)...
-start "VoiceForge - Celery Worker" cmd /k "cd /d "%BACKEND%" && call venv\Scripts\activate.bat && celery -A workers.celery_app worker -P solo --loglevel=info"
+echo [*] Starting the job worker - Celery, solo pool...
+start "Dataset Studio - worker" /D "%BACKEND%" cmd /k ""%VPY%" -m celery -A workers.celery_app worker -P solo --loglevel=info"
 
-echo [*] Launching FastAPI backend server on port %PORT%...
-start "VoiceForge - FastAPI Server" cmd /k "cd /d "%BACKEND%" && call venv\Scripts\activate.bat && uvicorn main:app --host 0.0.0.0 --port %PORT% --reload --reload-exclude static/* --reload-exclude tmp/* --reload-exclude *.db"
+echo [*] Starting the API on %VOICEFORGE_HOST%:%VOICEFORGE_PORT%...
+start "Dataset Studio - API" /D "%BACKEND%" cmd /k ""%VPY%" -m uvicorn main:app --host %VOICEFORGE_HOST% --port %VOICEFORGE_PORT%"
 
-echo [*] Launching React Vite frontend...
-start "VoiceForge - React Frontend" cmd /k "cd /d "%FRONTEND%" && npm run dev"
+echo [*] Starting the web UI...
+start "Dataset Studio - web UI" /D "%FRONTEND%" cmd /k "npm run dev"
 
 echo.
 echo ===================================================
-echo   VoiceForge Dataset Studio Started!
-echo.
-echo   Frontend Web UI: http://localhost:5173
-echo   Backend API:     http://localhost:%PORT%
-echo   API Docs:        http://localhost:%PORT%/docs
+echo   Web UI:    http://localhost:5173
+echo   API:       http://localhost:%VOICEFORGE_PORT%
+echo   API docs:  http://localhost:%VOICEFORGE_PORT%/docs
 echo ===================================================
+echo Close the three service windows to stop everything.
 echo.
-echo Close the process windows to stop the services.
-echo.
+timeout /t 5 /nobreak >nul
+start "" http://localhost:5173
+exit /b 0
+
+:no_venv
+echo [ERROR] The Python environment is missing. Run setup.bat first.
 pause
+exit /b 1
+
+:no_node_modules
+echo [ERROR] The web UI dependencies are missing. Run setup.bat first.
+pause
+exit /b 1

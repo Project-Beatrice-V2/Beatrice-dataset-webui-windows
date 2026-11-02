@@ -1,5 +1,6 @@
 """Nicovideo search + yt-dlp."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -9,6 +10,11 @@ logger = logging.getLogger(__name__)
 
 
 async def search_nicovideo(query: str, character_info: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Runs the blocking yt-dlp search in a worker thread (keeps the API responsive)."""
+    return await asyncio.to_thread(_search_nicovideo_sync, query, character_info)
+
+
+def _search_nicovideo_sync(query: str, character_info: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Search Nicovideo for JP anime content."""
     info = character_info or {}
     search_q = f"{query} {info.get('series', '')} 声"

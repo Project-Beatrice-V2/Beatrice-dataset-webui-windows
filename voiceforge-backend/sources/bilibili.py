@@ -1,5 +1,6 @@
 """Bilibili search + yt-dlp."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -11,6 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 async def search_bilibili(query: str, character_info: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Runs the blocking yt-dlp search in a worker thread (keeps the API responsive)."""
+    return await asyncio.to_thread(_search_bilibili_sync, query, character_info)
+
+
+def _search_bilibili_sync(query: str, character_info: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Search Bilibili for anime voice content."""
     settings = get_settings()
     info = character_info or {}

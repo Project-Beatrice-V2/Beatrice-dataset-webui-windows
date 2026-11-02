@@ -1,113 +1,139 @@
-# VoiceForge Dataset Studio Setup (PowerShell - Windows)
+# Beatrice Dataset Studio - one-time setup for Windows (PowerShell).
+#
+# Windows blocks unsigned scripts by default. Run it like this (only this process is affected):
+#   powershell -ExecutionPolicy Bypass -File .\setup.ps1
+# or right-click setup.ps1 > "Run with PowerShell".
 
-$ErrorActionPreference = "Stop"
+# Native tools (pip, npm, nvidia-smi) report failure through $LASTEXITCODE. 'Stop' would turn
+# their harmless stderr output into terminating errors in Windows PowerShell 5.1.
+$ErrorActionPreference = 'Continue'
 
-Write-Host "===================================================" -ForegroundColor Cyan
-Write-Host "  VoiceForge Dataset Studio Setup (Windows PS)" -ForegroundColor Cyan
-Write-Host "===================================================" -ForegroundColor Cyan
-Write-Host ""
+$Root = $PSScriptRoot
+$Backend = Join-Path $Root 'voiceforge-backend'
+$Frontend = Join-Path $Root 'frontend'
+$VPy = Join-Path $Backend 'venv\Scripts\python.exe'
+$TorchCuda = if ($env:TORCH_CUDA) { $env:TORCH_CUDA } else { 'cu128' }
 
-$ROOT = $PSScriptRoot
-$BACKEND = Join-Path $ROOT "voiceforge-backend"
-$FRONTEND = Join-Path $ROOT "frontend"
-
-Set-Location $BACKEND
-
-# 1. Python Check
-Write-Host "[*] Checking Python environment..." -ForegroundColor Yellow
-$PythonCmd = Get-Command python -ErrorAction SilentlyContinue
-if (-not $PythonCmd) {
-    Write-Error "Python not found in PATH. Please install Python 3.11 or 3.12 from https://www.python.org/"
+function Fail([string]$Message) {
+    Write-Host "[ERROR] $Message" -ForegroundColor Red
+    exit 1
 }
 
-$PyVer = & python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
-Write-Host "Using Python $PyVer" -ForegroundColor Green
+Write-Host '===================================================' -ForegroundColor Cyan
+Write-Host '  Beatrice Dataset Studio setup - Windows (PowerShell)' -ForegroundColor Cyan
+Write-Host '===================================================' -ForegroundColor Cyan
 
-# 2. Virtual Environment
-$VenvDir = Join-Path $BACKEND "venv"
-if (-not (Test-Path $VenvDir)) {
-    Write-Host "[*] Creating virtual environment..." -ForegroundColor Yellow
-    python -m venv venv
+# 1. Python 3.12 or 3.11 (the py launcher first; plain "python" may be the Store stub)
+Write-Host '[*] Looking for Python 3.12 or 3.11...' -ForegroundColor Yellow
+$PyCmd = $null
+$probe = 'import sys; sys.exit(0 if sys.version_info[:2] in ((3, 11), (3, 12)) else 1)'
+foreach ($spec in @('py -3.12', 'py -3.11', 'python')) {
+    $candidate = @($spec -split ' ')
+    $exe = $candidate[0]
+    $pre = @($candidate | Select-Object -Skip 1)
+    if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
+    & $exe @pre -c $probe *> $null
+    if ($LASTEXITCODE -eq 0) { $PyCmd = $candidate; break }
+}
+if (-not $PyCmd) {
+    Fail 'Python 3.12 or 3.11 not found. Install it with: winget install Python.Python.3.12'
+}
+$PyExe = $PyCmd[0]
+$PyPre = @($PyCmd | Select-Object -Skip 1)
+Write-Host ("[OK] Using " + (& $PyExe @PyPre --version)) -ForegroundColor Green
+
+# 2. Virtual environment
+Set-Location $Backend
+if (-not (Test-Path $VPy)) {
+    Write-Host '[*] Creating virtual environment...' -ForegroundColor Yellow
+    & $PyExe @PyPre -m venv venv
+    if ($LASTEXITCODE -ne 0) { Fail "Could not create $Backend\venv" }
 }
 
-$VenvActivate = Join-Path $VenvDir "Scripts\Activate.ps1"
-if (Test-Path $VenvActivate) {
-    & $VenvActivate
+# 3. Python packages (no activation needed: the venv's python.exe is called directly)
+Write-Host '[*] Upgrading pip, setuptools and wheel...' -ForegroundColor Yellow
+& $VPy -m pip install --upgrade pip setuptools wheel
+if ($LASTEXITCODE -ne 0) { Fail 'pip upgrade failed' }
+
+$HasNvidia = [bool](Get-Command nvidia-smi -ErrorAction SilentlyContinue)
+if ($HasNvidia) {
+    Write-Host "[*] NVIDIA GPU detected: installing the CUDA build of PyTorch ($TorchCuda)..." -ForegroundColor Cyan
+    & $VPy -m pip install torch torchaudio --index-url "https://download.pytorch.org/whl/$TorchCuda"
+    if ($LASTEXITCODE -ne 0) { Write-Warning 'CUDA PyTorch install failed; continuing with the default build.' }
 } else {
-    $env:PATH = "$(Join-Path $VenvDir 'Scripts');$env:PATH"
+    Write-Host '[INFO] No NVIDIA GPU found: PyTorch will run on the CPU.' -ForegroundColor DarkGray
 }
 
-# 3. Dependencies
-Write-Host "[*] Upgrading pip, setuptools, wheel..." -ForegroundColor Yellow
-python -m pip install --upgrade pip setuptools wheel
+Write-Host '[*] Installing Python requirements (several GB)...' -ForegroundColor Yellow
+& $VPy -m pip install -r requirements.txt
+if ($LASTEXITCODE -ne 0) { Fail 'Installing requirements failed (see the pip error above)' }
+# resemblyzer pins the source-only webrtcvad; webrtcvad-wheels already provides it.
+& $VPy -m pip install --no-deps 'resemblyzer>=0.1.4'
+if ($LASTEXITCODE -ne 0) { Fail 'Installing resemblyzer failed' }
 
-Write-Host "[*] Installing Python dependencies..." -ForegroundColor Yellow
-pip install -r requirements.txt
-
-# CUDA GPU Detection
-$NvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
-if ($NvidiaSmi) {
-    Write-Host "[*] NVIDIA GPU detected via nvidia-smi." -ForegroundColor Cyan
-    $CudaAvailable = & python -c "import torch; print(torch.cuda.is_available())" 2>$null
-    if ($CudaAvailable -ne "True") {
-        Write-Host "[*] Installing PyTorch with CUDA 12.1 acceleration..." -ForegroundColor Yellow
-        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-    } else {
-        Write-Host "[OK] PyTorch CUDA support is enabled." -ForegroundColor Green
+if ($HasNvidia) {
+    $cudaCheck = 'import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)'
+    & $VPy -c $cudaCheck *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host '[*] Restoring the CUDA build of PyTorch...' -ForegroundColor Yellow
+        & $VPy -m pip install --force-reinstall --no-deps torch torchaudio --index-url "https://download.pytorch.org/whl/$TorchCuda"
+        & $VPy -c $cudaCheck *> $null
     }
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host '[OK] PyTorch can use your NVIDIA GPU.' -ForegroundColor Green
+    } else {
+        Write-Warning 'PyTorch cannot see the GPU. Update the NVIDIA driver, or set $env:TORCH_CUDA = "cu126" for older cards and run setup again.'
+    }
+}
+
+# 4. Optional downloads
+Write-Host '[*] Installing the Playwright Chromium browser (optional)...' -ForegroundColor Yellow
+& $VPy -m playwright install chromium *> $null
+if ($LASTEXITCODE -ne 0) { Write-Host '[INFO] Playwright browser skipped (optional).' -ForegroundColor DarkGray }
+
+Write-Host '[*] Pre-downloading the Demucs model htdemucs_ft (optional)...' -ForegroundColor Yellow
+& $VPy -c "from demucs.pretrained import get_model; get_model('htdemucs_ft'); print('Demucs model ready.')"
+if ($LASTEXITCODE -ne 0) { Write-Host '[INFO] The Demucs model will download on first use.' -ForegroundColor DarkGray }
+
+# 5. Folders, settings, database
+New-Item -ItemType Directory -Force -Path (Join-Path $Backend 'static\outputs') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Backend 'tmp') | Out-Null
+$DotEnv = Join-Path $Backend '.env'
+if (-not (Test-Path $DotEnv)) {
+    Copy-Item (Join-Path $Backend '.env.example') $DotEnv
+    Write-Host '[OK] Created voiceforge-backend\.env - add your HF_TOKEN there.' -ForegroundColor Green
+}
+
+Write-Host '[*] Initializing the database...' -ForegroundColor Yellow
+& $VPy -c "from database import init_db; init_db(); print('Database initialized.')"
+if ($LASTEXITCODE -ne 0) { Fail 'Database initialisation failed' }
+
+# 6. Web UI
+Write-Host '[*] Installing web UI dependencies...' -ForegroundColor Yellow
+Set-Location $Frontend
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    & npm install
+    if ($LASTEXITCODE -ne 0) { Fail 'npm install failed (Node.js 20.19+ or 22 LTS is required)' }
 } else {
-    Write-Host "[INFO] No NVIDIA GPU detected. PyTorch will run in CPU mode." -ForegroundColor DarkGray
+    Write-Warning 'Node.js not found. Install it with: winget install OpenJS.NodeJS.LTS, then run setup again.'
 }
 
-# 4. Playwright Browser
-Write-Host "[*] Installing Playwright Chromium browser..." -ForegroundColor Yellow
-playwright install chromium 2>$null
-
-# 5. Pre-download Demucs
-Write-Host "[*] Pre-downloading Demucs model (htdemucs_ft)..." -ForegroundColor Yellow
-python -c "try:`n    from demucs.pretrained import get_model`n    get_model('htdemucs_ft')`n    print('Demucs model downloaded')`nexcept Exception as e:`n    print(e)" 2>$null
-
-# 6. Database Init
-Write-Host "[*] Initializing SQLite database..." -ForegroundColor Yellow
-python -c "from database import init_db; init_db(); print('Database initialized')"
-
-New-Item -ItemType Directory -Force -Path (Join-Path $BACKEND "static\outputs") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $BACKEND "tmp") | Out-Null
-
-$DotEnv = Join-Path $BACKEND ".env"
-$DotEnvExample = Join-Path $BACKEND ".env.example"
-if ((-not (Test-Path $DotEnv)) -and (Test-Path $DotEnvExample)) {
-    Copy-Item $DotEnvExample $DotEnv
-    Write-Host "[OK] Created .env from .env.example" -ForegroundColor Green
-}
-
-# 7. Frontend Setup
-Write-Host "[*] Setting up React Frontend..." -ForegroundColor Yellow
-Set-Location $FRONTEND
-$NpmCmd = Get-Command npm -ErrorAction SilentlyContinue
-if ($NpmCmd) {
-    npm install
+# 7. Environment checks
+Write-Host ''
+Write-Host '  Environment checks' -ForegroundColor Cyan
+if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+    Write-Host '[OK] FFmpeg found.' -ForegroundColor Green
 } else {
-    Write-Warning "npm not found! Please install Node.js 18+ from https://nodejs.org/"
+    Write-Warning 'FFmpeg not found. Install it with: winget install Gyan.FFmpeg (then open a new terminal).'
 }
-
-# 8. Dependency Check Summary
-Write-Host ""
-Write-Host "===================================================" -ForegroundColor Cyan
-Write-Host "  Environment Checks & Recommendations" -ForegroundColor Cyan
-Write-Host "===================================================" -ForegroundColor Cyan
-
-if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-    Write-Warning "FFmpeg not found in PATH. Install via Winget: winget install Gyan.FFmpeg"
+& $VPy -c 'import redis; redis.Redis(socket_connect_timeout=1).ping()' *> $null
+if ($LASTEXITCODE -eq 0) {
+    Write-Host '[OK] A Redis server is running.' -ForegroundColor Green
 } else {
-    Write-Host "[OK] FFmpeg found in PATH." -ForegroundColor Green
+    Write-Warning 'No Redis server on localhost:6379. Install Memurai Developer: winget install Memurai.MemuraiDeveloper (or run redis-server in WSL).'
 }
 
-if (-not (Get-Command redis-server -ErrorAction SilentlyContinue)) {
-    Write-Warning "Redis server not found. Install Memurai (https://www.memurai.com/) or Redis for Windows."
-} else {
-    Write-Host "[OK] Redis found in PATH." -ForegroundColor Green
-}
-
-Write-Host ""
-Write-Host "Setup Complete! Run .\start.ps1 to start VoiceForge Dataset Studio" -ForegroundColor Green
+Set-Location $Root
+Write-Host ''
+Write-Host 'Setup complete. Put your Hugging Face token in voiceforge-backend\.env (HF_TOKEN=...), then run start.ps1:' -ForegroundColor Green
+Write-Host '  powershell -ExecutionPolicy Bypass -File .\start.ps1' -ForegroundColor Green

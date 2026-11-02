@@ -52,12 +52,21 @@ def _diarize_file(
         from models.pyannote_loader import get_pyannote_pipeline
 
         pipeline = get_pyannote_pipeline()
-        diarization = pipeline(str(audio_path))
+        # Hand pyannote the decoded waveform: this avoids its own file decoding
+        # (torchaudio backends in 3.x, torchcodec + shared FFmpeg in 4.x).
+        import soundfile as sf
+        import torch
+
+        data, sr = sf.read(str(audio_path), dtype="float32", always_2d=True)
+        waveform = torch.from_numpy(data.T.copy())
+        diarization = pipeline({"waveform": waveform, "sample_rate": sr})
+        # pyannote.audio 4.x returns an output object; 3.x returns the Annotation itself
+        annotation = getattr(diarization, "speaker_diarization", diarization)
 
         segments = []
         speaker_times: dict[str, float] = {}
 
-        for turn, _, speaker in diarization.itertracks(yield_label=True):
+        for turn, _, speaker in annotation.itertracks(yield_label=True):
             segments.append({
                 "start": turn.start,
                 "end": turn.end,
